@@ -1,0 +1,26 @@
+[package]
+authors = ["Marcus Geiger"]
+description = "A DNS updater for Gandi.net, ideal for use as container."
+documentation = "https://docs.rs/gandi-dns-update/"
+edition = "2018"
+homepage = "https://github.com/bwolf/gandi-dns-update.git"
+keywords = ["dns", "gandi"]
+license = "Apache-2.0"
+name = "gandi-dns-update"
+readme = "README.md"
+repository = "https://github.com/bwolf/gandi-dns-update.git"
+version = "0.1.0"
+
+[dependencies]
+env_logger = "0.7"
+envy = "0.4"
+log = "0.4"
+reqwest = { version = "0.10", default_features = false, features = ["rustls-tls"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+trust-dns-resolver = "0.19.3"
+trust-dns-proto = "0.19.3"
+tokio = { version = "0.2", features = ["full"] }
+
+[profile.release]
+lto = true
