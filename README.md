@@ -5,22 +5,22 @@
 
 ## Principle of Operation
 
-1. Don't rely on the system resolver, as DNS requests maybe proxied
-2. Use Google DNS to lookup the NS of `resolver1.opendns.com`
-3. Determine the current dynamic IP
-    1. Use `myip.opendns.com` to lookup the current dynamic IP
-    2. Alternatively, if `DOMAIN_IP` is given, disable the dynamic lookup and use this IP address
-4. Use Google DNS to lookup the NS of the given domain (hosted with Gandi.net)
-5. For each given dynamic item, lookup the (A) record in the Gandi NS and compare it against the current dynamic IP. Update it if it does not match
-6. Update DNS (A) record at Gandi, using the Gandi Live DNS API
+1. Do not rely on the system resolver, because DNS requests can be fed through a proxy.
+2. Use Google DNS to lookup the NS of `resolver1.opendns.com`.
+3. Determine the current dynamic IP:
+    1. Use `myip.opendns.com` to lookup the current dynamic IP.
+    2. Alternatively, if `DOMAIN_IP` is given, disable the dynamic lookup and use this IP address.
+4. Use Google DNS to lookup the NS of the given domain (hosted with Gandi.net).
+5. For each given dynamic item, lookup the (A) record in the Gandi NS and compare it against the current dynamic IP. Update it if it does not match.
+6. Update DNS (A) record at Gandi, using the Gandi Live DNS API.
 
 Network Timeouts (currently not configurable):
 - DNS lookup: 15 seconds
 - HTTP methods: 15 seconds
 
-Commentary:
+### Commentary
 
-I was in the need for a tool like this for a longer time, and although there seem many projects like this one, most are either unmaintained, use either Python or Go (fill in arbitrary programming language here) in some unsupported older version, use configuration files, only use the system resolver, or don't use proper networking timeouts. At some point I wrote a quick and dirty sketch in Python (using `dns-lexicon`) which worked (besides timeouts), but the container image had a size of 70 MiB. Running it in Kubernetes every 5 minutes 24/7 revealed that sometimes the jobs hangs because of a race conditions in the DNS resolver logic.
+I was in need for a tool like this for quite some time, and although there seem many projects like this one, most are either unmaintained, use either Python or Go (fill in arbitrary programming language here), using deprecated requirements, use configuration files, only use the system resolver, or do not use networking timeouts. At some point last year, I wrote a quick and dirty sketch in Python (using `dns-lexicon`) which worked (besides timeouts), but the container image had a size of 70 MiB. Running it in Kubernetes every 5 minutes 24/7 revealed that sometimes the job hangs because of a race conditions in the DNS resolver logic. This lead me to rewrite it from scratch in Rust, using [trust-dns-resolver](https://github.com/bluejekyll/trust-dns) and [reqwest](https://github.com/seanmonstar/reqwest/) which both internally use the [Tokio](http://tokio.rs) runtime (this somehow contradicts the plan to create a minimal executable), but with a size of 2.5 MiB of the compressed container image, I find it acceptable.
 
 
 ### Limitations
@@ -28,9 +28,18 @@ I was in the need for a tool like this for a longer time, and although there see
 - only Gandi is supported
 
 
+## Building
+
+    cargo build --release
+
+
+## Container Images
+Please find container images on [docker hub](https://hub.docker.com/r/bwolf/gandi-dns-update). An automatic build is configured for HEAD as `:latest` and RELEASES as numbered tags.
+
+
 ## Configuration
 
-The following environment variables must be given:
+The following environment variables are understood:
 
 - `GANDI_API_KEY` :: Gandi Live DNS API key
 - `DOMAIN_IP` :: Optionally disable current dynamic IP lookup and use this IP address
