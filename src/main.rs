@@ -118,15 +118,16 @@ async fn dns_lookup(
 }
 
 fn resolver_opts_with_timeout() -> ResolverOpts {
-    let mut opts = ResolverOpts::default();
-    opts.timeout = DNS_TIMEOUT;
-    opts.use_hosts_file = false;
-    opts
+    ResolverOpts {
+        timeout: DNS_TIMEOUT,
+        use_hosts_file: false,
+        ..Default::default()
+    }
 }
 
 async fn whats_my_ip(bootstrap_resolver: &TokioAsyncResolver) -> Result<Ipv4Addr, AppError> {
     let resolver_record = dns_lookup(
-        &bootstrap_resolver,
+        bootstrap_resolver,
         "resolver1.opendns.com.".into(),
         RecordType::A,
     )
@@ -180,8 +181,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             "Configuration entry `domain_fqdn` does not end with '.': {}",
             &config.domain_fqdn
         );
-        error!("{}", msg);
-        panic!(msg);
+        panic!("{}", msg);
     }
 
     let google_dns =
@@ -261,7 +261,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
             gandi
                 .update_a_record(
-                    &domain_fqdn_without_dot,
+                    domain_fqdn_without_dot,
                     domain_dynamic_item,
                     &my_ip.to_string(),
                     Duration::from_secs(300).into(),

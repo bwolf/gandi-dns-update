@@ -22,13 +22,13 @@ struct GandiRRSet {
 }
 
 #[derive(Debug)]
-pub struct TTL {
+pub struct Ttl {
     secs: u64,
 }
 
-impl From<Duration> for TTL {
+impl From<Duration> for Ttl {
     fn from(d: Duration) -> Self {
-        TTL { secs: d.as_secs() }
+        Self { secs: d.as_secs() }
     }
 }
 
@@ -48,14 +48,13 @@ impl GandiClient {
         domain: &str,
         name: &str,
         value: &str,
-        ttl: TTL,
+        ttl: Ttl,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
         // curl -X PUT -H "Content-Type: application/json" \
         //   -H "X-Api-Key: $APIKEY" \
         //   -d '{"rrset_ttl": 10800,
         //        "rrset_values":["<VALUE>"]}' \
         //   https://dns.api.gandi.net/api/v5/domains/<DOMAIN>/records/<NAME>/<TYPE>
-
         if domain.ends_with('.') {
             return Err(From::from(
                 "Domain in Gandi live API request must not end with '.'",
