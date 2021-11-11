@@ -9,18 +9,13 @@ license = "Apache-2.0"
 name = "gandi-dns-update"
 readme = "README.md"
 repository = "https://github.com/bwolf/gandi-dns-update.git"
-version = "0.1.0"
+version = "99.99.2"
 
 [dependencies]
 env_logger = "0.9"
-envy = "0.4"
 log = "0.4"
-reqwest = { version = "0.11", default_features = false, features = ["rustls-tls"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-trust-dns-resolver = { version = "0.19", default_features = false, features = ["system-config", "tokio-runtime"] }
-trust-dns-proto = "0.19"
-tokio = { version = "1.1", features = ["full"] }
-
-[profile.release]
-lto = true
+trust-dns-resolver = { version = "0.20", default_features = false, features = [ "tokio-runtime" ] }
+reqwest = { version = "0.11", default_features = false, features = [ "rustls-tls-webpki-roots" ] }
+tokio = { version = "1", features = [ "macros" ] }

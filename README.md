@@ -20,7 +20,7 @@ Network Timeouts (currently not configurable):
 
 ### Commentary
 
-I was in need for a tool like this for quite some time, and although there seem many projects like this one, most are either unmaintained, use either Python or Go (fill in arbitrary programming language here), using deprecated requirements, use configuration files, only use the system resolver, or do not use networking timeouts. At some point last year, I wrote a quick and dirty sketch in Python (using `dns-lexicon`) which worked (besides timeouts), but the container image had a size of 70 MiB. Running it in Kubernetes every 5 minutes 24/7 revealed that sometimes the job hangs because of a race conditions in the DNS resolver logic. This lead me to rewrite it from scratch in Rust, using [trust-dns-resolver](https://github.com/bluejekyll/trust-dns) and [reqwest](https://github.com/seanmonstar/reqwest/) which both internally use the [Tokio](http://tokio.rs) runtime (this somehow contradicts the plan to create a minimal executable), but with a size of 2.5 MiB of the compressed container image, I find it acceptable.
+I was in need for a tool like this for quite some time, and although there seem many projects like this one, most are either unmaintained, use either Python or Go (fill in arbitrary programming language here), using deprecated requirements, use configuration files, only use the system resolver, or do not use networking timeouts. At some point last year, I wrote a quick and dirty sketch in Python (using `dns-lexicon`) which worked (besides timeouts), but the container image had a size of 70 MiB. Running it in Kubernetes every 5 minutes 24/7 revealed that sometimes the job hangs because of a race conditions in the DNS resolver logic. This lead me to rewrite it from scratch in Rust, to learn something and to minimize the container image size. It uses [trust-dns-resolver](https://github.com/bluejekyll/trust-dns) and `reqwest`. The final binary has 8 MiB and the container image has 9 MiB.
 
 
 ### Limitations
@@ -30,11 +30,11 @@ I was in need for a tool like this for quite some time, and although there seem 
 
 ## Building
 
-    cargo build --release
+    nix build OR nix build .#gandi-dns-update-image OR cargo build --release
 
 
 ## Container Images
-Please find container images on [docker hub](https://hub.docker.com/r/bwolf/gandi-dns-update). An automatic build is configured for HEAD as `:latest` and RELEASES as numbered tags.
+Please find container images on [GitHub Packages](https://github.com/bwolf/gandi-dns-update). An automatic build is configured using GitHub actions.
 
 
 ## Configuration

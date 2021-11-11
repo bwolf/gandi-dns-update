@@ -1,9 +1,9 @@
 use log::{debug, info};
-use reqwest::header;
 use serde::{Deserialize, Serialize};
 use std::boxed::Box;
 use std::error::Error;
 use std::time::Duration;
+use reqwest::header;
 
 static GANDI_LIVE_DNS_BASE_URL: &str = "https://dns.api.gandi.net/api/v5";
 
@@ -80,12 +80,12 @@ impl GandiClient {
 
         debug!("Posting to {}, body {}", uri, request_body);
 
-        let response = reqwest::Client::new()
-            .put(&uri)
+        let client = reqwest::Client::new();
+        let response = client.put(&uri)
             .header(header::CONTENT_TYPE, "application/json")
             .header("X-Api-Key", &self.api_key)
-            .body(request_body)
             .timeout(self.timeout)
+            .body(request_body)
             .send()
             .await?;
 

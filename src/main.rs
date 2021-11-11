@@ -1,20 +1,28 @@
-use log::{debug, error, info, trace};
-use serde::Deserialize;
+use log::{debug, info, trace};
+use std::env;
 use std::error::Error;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::Duration;
 use std::{error, fmt};
-use tokio::task::JoinError;
-use trust_dns_proto::xfer::DnsRequestOptions;
+
 use trust_dns_resolver::config::{NameServerConfig, Protocol, ResolverConfig, ResolverOpts};
-use trust_dns_resolver::error::ResolveError;
 use trust_dns_resolver::lookup::Lookup;
 use trust_dns_resolver::proto::rr::{RData, Record, RecordType};
-use trust_dns_resolver::{AsyncResolver, TokioAsyncResolver};
+use trust_dns_resolver::proto::xfer::DnsRequestOptions;
+use trust_dns_resolver::{TokioAsyncResolver, error::ResolveError, TokioHandle};
 
 mod gandi_client;
 
 use gandi_client::GandiClient;
+
+type Resolver = TokioAsyncResolver;
+
+fn resolver(
+    config: ResolverConfig,
+    options: ResolverOpts
+) -> Result<Resolver, ResolveError> {
+    Resolver::new(config, options, TokioHandle)
+}
 
 static DNS_TIMEOUT: Duration = Duration::from_secs(15);
 static HTTP_TIMEOUT: Duration = Duration::from_secs(15);
@@ -25,7 +33,7 @@ macro_rules! crate_name {
     };
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug)]
 struct AppConfig {
     gandi_api_key: String,
     domain_ip: Option<Ipv4Addr>,
@@ -34,8 +42,32 @@ struct AppConfig {
 }
 
 impl AppConfig {
-    pub fn from_env() -> envy::Result<AppConfig> {
-        envy::from_env::<AppConfig>()
+    pub fn from_env() -> Self {
+        let gandi_api_key = env::var("GANDI_API_KEY").expect("GANDI_API_KEY env-var is present");
+        let domain_ip = env::var_os("DOMAIN_IP").map(|os| os.into_string().unwrap());
+        let domain_ip: Option<Ipv4Addr> = domain_ip.map(|s| s.parse().expect("Valid Ipv4Addr"));
+        let domain_fqdn = env::var("DOMAIN_FQDN").expect("DOMAIN_FQDN env-var is present");
+        let domain_dynamic_items =
+            env::var("DOMAIN_DYNAMIC_ITEMS").expect("DOMAIN_DYNAMIC_ITEMS env-var is present");
+
+        if !domain_fqdn.ends_with('.') {
+            panic!(
+                "Configuration entry `domain_fqdn` does not end with '.': {}",
+                domain_fqdn
+            );
+        }
+
+        let domain_dynamic_items: Vec<String> = domain_dynamic_items
+            .split(',')
+            .map(|s| s.to_string())
+            .collect();
+
+        Self {
+            gandi_api_key,
+            domain_ip,
+            domain_fqdn,
+            domain_dynamic_items,
+        }
     }
 }
 
@@ -74,12 +106,6 @@ impl From<ResolveError> for AppError {
     }
 }
 
-impl From<JoinError> for AppError {
-    fn from(_error: JoinError) -> AppError {
-        AppError::new("Cannot join Tokio object")
-    }
-}
-
 fn ns_of_record(record: &Record) -> Option<String> {
     match record.rdata() {
         RData::NS(name) => Some(name.to_utf8()),
@@ -95,7 +121,7 @@ fn ipv4_of_record(record: &Record) -> Option<Ipv4Addr> {
 }
 
 async fn dns_lookup(
-    resolver: &TokioAsyncResolver,
+    resolver: &Resolver,
     name: String,
     rr_type: RecordType,
 ) -> Result<Record, AppError> {
@@ -125,7 +151,7 @@ fn resolver_opts_with_timeout() -> ResolverOpts {
     }
 }
 
-async fn whats_my_ip(bootstrap_resolver: &TokioAsyncResolver) -> Result<Ipv4Addr, AppError> {
+async fn whats_my_ip(bootstrap_resolver: &Resolver) -> Result<Ipv4Addr, AppError> {
     let resolver_record = dns_lookup(
         bootstrap_resolver,
         "resolver1.opendns.com.".into(),
@@ -140,6 +166,7 @@ async fn whats_my_ip(bootstrap_resolver: &TokioAsyncResolver) -> Result<Ipv4Addr
         protocol: Protocol::Udp,
         socket_addr: SocketAddr::new(IpAddr::V4(resolver_ip), 53),
         tls_dns_name: None,
+        trust_nx_responses: true,
     };
 
     let resolver_config = ResolverConfig::from_parts(
@@ -148,17 +175,16 @@ async fn whats_my_ip(bootstrap_resolver: &TokioAsyncResolver) -> Result<Ipv4Addr
         vec![ns_config],
     );
 
-    let resolver = TokioAsyncResolver::tokio(resolver_config, resolver_opts_with_timeout());
-    let resolver = tokio::spawn(resolver).await??;
+    let resolver = resolver(resolver_config, resolver_opts_with_timeout())?;
 
     let my_ip_record = dns_lookup(&resolver, "myip.opendns.com".into(), RecordType::A).await?;
 
     ipv4_of_record(&my_ip_record).ok_or_else(|| AppError::new("No IPv4 record found"))
 }
 
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
-    match std::env::var("RUST_LOG") {
+        match std::env::var("RUST_LOG") {
         Ok(_) => {}
         Err(_) => {
             let logger = crate_name!().replace("-", "_");
@@ -167,27 +193,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     }
     env_logger::init();
 
-    let config = match AppConfig::from_env() {
-        Ok(c) => c,
-        Err(e) => {
-            let msg = format!("Configuration error: {}", e);
-            error!("{}", msg);
-            panic!("{}", msg);
-        }
-    };
-
-    if !config.domain_fqdn.ends_with('.') {
-        let msg = format!(
-            "Configuration entry `domain_fqdn` does not end with '.': {}",
-            &config.domain_fqdn
-        );
-        panic!("{}", msg);
-    }
-
-    let google_dns =
-        TokioAsyncResolver::tokio(ResolverConfig::google(), resolver_opts_with_timeout());
-    let google_dns: AsyncResolver<_, _> = tokio::spawn(google_dns).await??;
-
+    let config = AppConfig::from_env();
+    let google_dns = resolver(ResolverConfig::google(), resolver_opts_with_timeout())?;
     let gandi = GandiClient::new(config.gandi_api_key, HTTP_TIMEOUT);
 
     // Which IP address to use for updating domain records.
@@ -231,13 +238,12 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             protocol: Protocol::Udp,
             socket_addr: SocketAddr::new(IpAddr::V4(domain_ns_ip), 53),
             tls_dns_name: None,
+            trust_nx_responses: true,
         };
         let domain_resolver_config =
             ResolverConfig::from_parts(Some(domain_record.name().clone()), vec![], vec![ns_config]);
 
-        let domain_resolver =
-            TokioAsyncResolver::tokio(domain_resolver_config, ResolverOpts::default());
-        let domain_resolver = tokio::spawn(domain_resolver).await??;
+        let domain_resolver = resolver(domain_resolver_config, ResolverOpts::default())?;
 
         // Check the dynamic DNS record using this resolver
         let dynamic_record_name = format!("{}.{}", domain_dynamic_item, domain_fqdn);
