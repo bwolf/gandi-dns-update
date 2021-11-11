@@ -1,0 +1,130 @@
+# Actions Overview
+# ----------------
+# Jobs:
+# - prepare :: generic build preparation
+# - verify  :: build and test
+# - release :: build container image and push to registry
+#
+# Trigger:
+# - prepare and verify :: runs always
+# - release :: run only for tags of the form v*.*.*
+#
+# Failures:
+# - in release mode and git tag v(*.*.*) does not match Cargo.toml/version
+
+on:
+  - push
+  - pull_request
+
+name: Build
+
+env:
+  CARGO_TERM_COLOR: always
+  CONTAINER_REGISTRY: docker.pkg.github.com
+
+jobs:
+  prepare:
+    name: Prepare
+    runs-on: ubuntu-latest
+
+    outputs:
+      cargo_version: ${{ steps.get_versions.outputs.cargo_version }}
+      is_tag: ${{ steps.get_versions.outputs.is_tag }}
+      is_release_tag: ${{ steps.get_versions.outputs.is_release_tag }}
+      plain_tag_version: ${{ steps.get_versions.outputs.plain_tag_version }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+
+      - name: Get versions
+        id: get_versions
+        shell: bash
+        run: |
+          echo ::set-output name=cargo_version::$(grep "^version" Cargo.toml | head -1 | sed -e 's/.*"\(.*\)".*/\1/')
+          echo ::set-output name=is_tag::$([[ $GITHUB_REF_TYPE = tag ]] && echo 1 || echo 0)
+          echo ::set-output name=is_release_tag::$([[ $GITHUB_REF_NAME =~ ^v[0-9]+\.[0-9]+\.[0-9]+.*$ ]] && echo 1 || echo 0)
+          echo ::set-output name=plain_tag_version::$([[ $GITHUB_REF_NAME =~ ^v([0-9]+\.[0-9]+\.[0-9]+.*)$ ]] && echo "${BASH_REMATCH[1]}")
+
+  verify:
+    name: Verify build and test
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Prepare Nix
+        # NOTE https://github.com/cachix/install-nix-action
+        uses: cachix/install-nix-action@v14.1
+        with:
+          install_url: https://nixos-nix-install-tests.cachix.org/serve/vij683ly7sl95nnhb67bdjjfabclr85m/install
+          install_options: '--tarball-url-prefix https://nixos-nix-install-tests.cachix.org/serve'
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Prepare Cachix
+        uses: cachix/cachix-action@v10
+        with:
+          # NOTE https://github.com/cachix/cachix-action/blob/master/action.yml
+          name: bwolf
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          signingKey: ${{ secrets.CACHIX_SIGNINKEY }}
+
+      - name: Run Nix build
+        run: |
+          echo cargo check\;cargo test | nix build -vv
+
+  build-container-image:
+    name: Build and push container image
+    needs:
+      - prepare
+      - verify
+    if: |
+      needs.prepare.outputs.is_tag == 1 && needs.prepare.outputs.is_release_tag == 1 && needs.prepare.outputs.cargo_version == needs.prepare.outputs.plain_tag_version
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Prepare Nix
+        uses: cachix/install-nix-action@v14.1
+        # NOTE https://github.com/cachix/install-nix-action
+        with:
+          install_url: https://nixos-nix-install-tests.cachix.org/serve/vij683ly7sl95nnhb67bdjjfabclr85m/install
+          install_options: '--tarball-url-prefix https://nixos-nix-install-tests.cachix.org/serve'
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Prepare Cachix
+        uses: cachix/cachix-action@v10
+        with:
+          # NOTE https://github.com/cachix/cachix-action/blob/master/action.yml
+          name: bwolf
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          signingKey: ${{ secrets.CACHIX_SIGNINKEY }}
+
+      - name: Run Nix build to build the container image
+        run: |
+          nix build -vvv .#gandi-dns-update-image
+          ls -l
+          du -sch result
+
+      - name: Load file-system image into dock engine
+        run: docker load < result
+
+      - name: Tag and push image to GitHub packages
+        env:
+          RELEASE: ${{ needs.prepare.outputs.cargo_version }}
+        run: |
+          # Login to GitHub container registry.
+          echo ${{ secrets.GITHUB_TOKEN }} | docker login $CONTAINER_REGISTRY -u USERNAME --password-stdin
+          # List currently load images, which must contain our image.
+          docker image ls
+          # Tag our image to be push-able to GitHub packages container
+          # registry. Tagging needs to follow
+          # docker.pkg.github.com/owner/repository/image_name:version.
+          docker tag gandi-dns-update:$RELEASE $CONTAINER_REGISTRY/$GITHUB_REPOSITORY/gandi-dns-update:$RELEASE
+          docker push $CONTAINER_REGISTRY/$GITHUB_REPOSITORY/gandi-dns-update:$RELEASE
