@@ -9,7 +9,7 @@ license = "Apache-2.0"
 name = "gandi-dns-update"
 readme = "README.md"
 repository = "https://github.com/bwolf/gandi-dns-update.git"
-version = "99.99.2"
+version = "0.2.0"
 
 [dependencies]
 env_logger = "0.9"
